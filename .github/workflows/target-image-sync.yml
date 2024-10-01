@@ -26,22 +26,28 @@ jobs:
       env:
         IMAGE: "${{ github.event.issue.title }}"
       run: |
-        ORIGIN_IMAGE="${IMAGE}"
+        ORIGIN_IMAGE=$(echo "${IMAGE}" | sed 's/ //g')
         if [[ "${ORIGIN_IMAGE}" == *"//"* ]] || [[ "${ORIGIN_IMAGE}" == *" "* ]]; then
           gh issue comment ${{ github.event.issue.number }} -b "镜像 '${ORIGIN_IMAGE}' 不是一个镜像"
           exit 1
         fi
         if [[ "${ORIGIN_IMAGE%%/*}" != *"."* ]] || [[ "${ORIGIN_IMAGE}" != *"/"* ]]; then
           if [[ "${ORIGIN_IMAGE}" != *":"* ]]; then
-            gh issue comment ${{ github.event.issue.number }} -b "镜像 '${ORIGIN_IMAGE}' 不存在呢, 请指定 域名 和 tag, 如: docker.io/${ORIGIN_IMAGE}:latest"
+            gh issue comment ${{ github.event.issue.number }} -b "由于你没有指定tag或者域名将使用默认的仓库\`docker.io\`和默认的tag\`latest\`,如: \`docker.io/${ORIGIN_IMAGE}:latest\`"
+            ORIGIN_IMAGE="docker.io/${ORIGIN_IMAGE}:latest"
+            gh issue edit ${{ github.event.issue.number }} --title "${ORIGIN_IMAGE}"
           else
-            gh issue comment ${{ github.event.issue.number }} -b "镜像 '${ORIGIN_IMAGE}' 不存在呢, 请指定域名, 如: docker.io/${ORIGIN_IMAGE}"
+            gh issue comment ${{ github.event.issue.number }} -b "由于你没有指定仓库名将使用默认的仓库\`docker.io\`,如: \`docker.io/${ORIGIN_IMAGE}\`"
+            ORIGIN_IMAGE="docker.io/${ORIGIN_IMAGE}"
+            gh issue edit ${{ github.event.issue.number }} --title "${ORIGIN_IMAGE}"
           fi
-          exit 1
+          # exit 1
         fi
         if [[ "${ORIGIN_IMAGE}" != *":"* ]]; then
-          gh issue comment ${{ github.event.issue.number }} -b "镜像 '${ORIGIN_IMAGE}' 不存在呢, 请指定 tag, 如: ${ORIGIN_IMAGE}:latest"
-          exit 1
+          gh issue comment ${{ github.event.issue.number }} -b "由于你没有指定仓库名将使用默认的tag\`latest\`, 如: \`${ORIGIN_IMAGE}:latest\`"
+          ORIGIN_IMAGE="${ORIGIN_IMAGE}:latest"
+          gh issue edit ${{ github.event.issue.number }} --title "${ORIGIN_IMAGE}"
+          # exit 1
         fi
         echo "image=${ORIGIN_IMAGE}" >> $GITHUB_OUTPUT
     - name: Check Image
@@ -55,20 +61,27 @@ jobs:
         registry: ${{ secrets.REGISTRY }}
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
+    - name: Install Skopeo
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y skopeo
     - name: Sync Docker Image
       run: |
         ORIGIN_IMAGE="${{ steps.get-image.outputs.image }}"
         BASE_IMAGE=$(echo ${ORIGIN_IMAGE} | sed 's/\(.*\):.*/\1/')
         TARGET_IMAGE="${{ secrets.REGISTRY }}/${{ secrets.NAMESPACE }}/${ORIGIN_IMAGE}"
-        
-        docker pull ${ORIGIN_IMAGE}
-        docker tag ${ORIGIN_IMAGE} ${TARGET_IMAGE}
-        docker push ${TARGET_IMAGE}
-        
-        # Capture the response from curl
-        RESPONSE=$(curl -s -X POST "${{ secrets.APIURL }}" \
+        skopeo copy docker://${ORIGIN_IMAGE} docker://${TARGET_IMAGE}
+        # docker pull ${ORIGIN_IMAGE}
+        # docker tag ${ORIGIN_IMAGE} ${TARGET_IMAGE}
+        # docker push ${TARGET_IMAGE}
+        docker pull ${TARGET_IMAGE}
+        # docker inspect ${TARGET_IMAGE}
+        curl -s -X POST "${{ secrets.APIURL }}/docker_metadata/" \
           -H "Content-Type: application/json" \
-          -H "Authorization: Bearer ${{ secrets.APIKEY }}" \
+          -d "`docker inspect ${TARGET_IMAGE}`"
+        # Capture the response from curl
+        RESPONSE=$(curl -s -X POST "${{ secrets.APIURL }}/set-image-public/" \
+          -H "Content-Type: application/json" \
           -d "{\"namespace\": \"${{ secrets.NAMESPACE }}\" , \"repository\": \"${BASE_IMAGE}\" }")
     
         # Define the expected value
@@ -77,7 +90,7 @@ jobs:
         # Check if the response matches the expected value
         if [[ "$RESPONSE" == "$EXPECTED_VALUE" ]]; then
           echo "API call was successful and returned the expected value."
-          gh issue comment ${{ github.event.issue.number }} -b "镜像 ${ORIGIN_IMAGE} 同步完成<br>请使用 ${TARGET_IMAGE} 替代源镜像"
+          gh issue comment ${{ github.event.issue.number }} -b "$(echo -e "\n镜像 \`${ORIGIN_IMAGE}\` 同步完成<br>请使用 \`${TARGET_IMAGE}\` 替代源镜像<br> <h1>快捷命令</h1>[去使用快捷复制和查看镜像详细信息](https://dockerimage.gbfeng.com/image/${ORIGIN_IMAGE})\n\`\`\`sh\n# Docker 拉取命令\ndocker pull ${TARGET_IMAGE}\ndocker tag ${TARGET_IMAGE} ${ORIGIN_IMAGE}\n\n# Containerd 拉取命令\nctr images pull ${TARGET_IMAGE}\nctr images tag ${TARGET_IMAGE} ${ORIGIN_IMAGE}\n\n# Shell 快速替换命令\nsed -i "s#${ORIGIN_IMAGE}#${TARGET_IMAGE}#g" 你的文件名\n\`\`\`\n")"
           gh issue edit ${{ github.event.issue.number }} --add-label "sync image succeeded" -b "IMAGE SYNC"
           gh issue close ${{ github.event.issue.number }} --reason "completed"
         else
@@ -85,19 +98,6 @@ jobs:
           echo "Response: $RESPONSE"
           exit 1
         fi
-
-    # - name: Sync Images
-    #   run: |
-    #     ORIGIN_IMAGE="${{ steps.get-image.outputs.image }}"
-    #     # curl --fail -X PUT "http://127.0.0.1:8000/internal/api/image/sync?image=${ORIGIN_IMAGE}"
-    #     # if ! ./hack/verify-allows.sh ./allows.txt "${ORIGIN_IMAGE}"; then
-    #     #   gh issue comment ${{ github.event.issue.number }} -b "镜像 ${ORIGIN_IMAGE} 同步完成<br>请使用 m.daocloud.io/${ORIGIN_IMAGE} 替代源镜像<br>这个镜像不在白名单列表里, 在未来可能将无法访问<br>将其添加到[白名单](https://github.com/DaoCloud/public-image-mirror/blob/main/allows.txt)"
-    #     # else
-    #     #   gh issue comment ${{ github.event.issue.number }} -b "镜像 ${ORIGIN_IMAGE} 同步完成<br>请使用 m.daocloud.io/${ORIGIN_IMAGE} 替代源镜像"
-    #     # fi
-    #     gh issue comment ${{ github.event.issue.number }} -b "镜像 ${ORIGIN_IMAGE} 同步完成<br>请使用 m.daocloud.io/${ORIGIN_IMAGE} 替代源镜像"
-    #     gh issue edit ${{ github.event.issue.number }} --add-label "sync image succeeded" -b "IMAGE SYNC"
-    #     gh issue close ${{ github.event.issue.number }} --reason "completed"
     - name: Fail Sync
       if: failure()
       run: |

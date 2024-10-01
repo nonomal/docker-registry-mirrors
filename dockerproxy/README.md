@@ -16,7 +16,8 @@
 </div><br>
 
 # 📝准备工作
-⚠️ 重要：一台国外的服务器，并且未被墙。一个域名，无需国内备案，便宜的就行(推荐xyz结尾的，首年最低7元)！通过脚本可自动实现HTTPS。
+⚠️ 重要：一台国外的服务器[腾讯云特惠服务器推荐](https://curl.qcloud.com/TJMyJvrd)，并且未被墙。一个域名，无需国内备案，便宜的就行(推荐xyz结尾的，首年最低7元)！通过脚本可自动实现HTTPS。
+
 
 使用脚本前请确认域名的[@记录和*记录]已经解析到该服务器！
 
@@ -31,6 +32,62 @@ apt -y install wget curl
 
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/kubesre/docker-registry-mirrors/main/dockerproxy/install/DockerProxy_Install.sh)"
 ```
+## 使用docker compose部署(自动配置https证书)
+<details>
+<summary><strong>使用docker compose部署</strong></summary>
+<div>
+  
+* 前提: 准备一个域名并做好 DNS 解析到准备好的服务器的 IP *
+
+在服务器里新建一个文件 docker-compose.yaml 内容如下
+```
+version: '3'
+services:
+  crproxy:
+    image: ghcr.io/daocloud/crproxy/crproxy:v0.9.1
+    container_name: crproxy
+    restart: unless-stopped
+    ports:
+    - 80:8080
+    - 443:8080
+    command: |
+      --acme-cache-dir=/tmp/acme
+      --acme-hosts=*
+      --default-registry=docker.io
+    tmpfs:
+      - /tmp/acme
+    
+    # 非必须, 如果这台服务器无法畅通的达到你要的镜像仓库可以尝试配置 
+    #environment:
+    #- https_proxy=http://proxy:8080
+    #- http_proxy=http://proxy:8080
+```
+然后执行 `docker-compose up -d`
+
+
+## 然后就能愉快的拉取镜像了
+
+``` shell
+docker pull 你的域名/hello-world
+```
+
+也可以添加到 /etc/docker/daemon.json
+
+``` json
+{
+  "registry-mirrors": [
+    "https://你的域名"
+  ]
+}
+```
+
+``` shell
+docker pull hello-world
+```
+</details>
+
+<del>
+  
 ## 使用Render部署（无需服务器和域名且免费方案）
 <details>
 <summary><strong>部署到 Render</strong></summary>
@@ -39,6 +96,8 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/kubesre/docker-registry-
 [使用Render快速部署](Render/README.md)
 
 </details>
+
+</del>
 
 ## 使用Sealos部署（无需服务器和域名-个人使用低成本方案）
 <details>
