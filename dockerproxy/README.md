@@ -16,13 +16,123 @@
 </div><br>
 
 # 📝准备工作
-⚠️ 重要：一台国外的服务器，并且未被墙。一个域名，无需国内备案，便宜的就行(推荐xyz结尾的，首年最低7元)！通过脚本可自动实现HTTPS。
+⚠️ 重要：一台国外的服务器[腾讯云特惠服务器推荐](https://curl.qcloud.com/TJMyJvrd)，并且未被墙。一个域名，无需国内备案，便宜的就行(推荐xyz结尾的，首年最低7元)！通过脚本可自动实现HTTPS。
+
 
 使用脚本前请确认域名的[@记录和*记录]已经解析到该服务器！
 
 
 # 🚀快速开始
+
+## 使用docker compose部署(自动配置https证书)
+
+
+  
+⚠️ 前提: 准备一个域名并做好 DNS 解析到准备好的服务器的 IP
+
+1. 在服务器里新建一个文件 docker-compose.yaml 内容如下
+```
+version: '3'
+services:
+  crproxy:
+    image: ghcr.io/daocloud/crproxy/crproxy:v0.9.1
+    container_name: crproxy
+    restart: unless-stopped
+    ports:
+    - 80:8080
+    - 443:8080
+    command: |
+      --acme-cache-dir=/tmp/acme
+      --acme-hosts=*
+      --default-registry=docker.io
+    tmpfs:
+      - /tmp/acme
+    
+    # 非必须, 如果这台服务器无法畅通的达到你要的镜像仓库可以尝试配置 
+    #environment:
+    #- https_proxy=http://proxy:8080
+    #- http_proxy=http://proxy:8080
+```
+
+2.然后执行 `docker-compose up -d`
+
+
+3.然后就能愉快的拉取镜像了
+
+``` shell
+docker pull 你的域名/hello-world
+```
+
+4.也可以添加到 /etc/docker/daemon.json
+
+``` json
+{
+  "registry-mirrors": [
+    "https://你的域名"
+  ]
+}
+```
+
+``` shell
+docker pull hello-world
+```
+<details>
+<summary><strong>进阶版本docker-compose（支持别名）</strong></summary>
+  
+### 进阶版本docker-compose（支持别名）
+1. 在服务器里新建一个文件 docker-compose.yaml 内容如下
+
+```
+version: '3'
+services:
+  crproxy:
+    image: ghcr.io/daocloud/crproxy/crproxy:v0.13.0-alpha.15-4
+    container_name: crproxy
+    restart: unless-stopped
+    ports:
+      - "80:8080"
+      - "443:8080"
+    environment:
+      - DOMAIN=you_domain.xyz  # 在此处定义域名变量
+    command: |
+      -a :8080 
+      --enable-pprof true 
+      --retry 3 
+      --retry-interval 3s 
+      --disable-keep-alives nvcr.io 
+      --privileged-no-auth 
+      --simple-auth 
+      --token-url "https://$${DOMAIN}/auth/token"  # 使用双$$避免 compose 转义
+      --override-default-registry=docker.$${DOMAIN}=docker.io
+      --override-default-registry=l5d.$${DOMAIN}=cr.l5d.io
+      --override-default-registry=elastic.$${DOMAIN}=docker.elastic.co
+      --override-default-registry=gcr.$${DOMAIN}=gcr.io
+      --override-default-registry=ghcr.$${DOMAIN}=ghcr.io
+      --override-default-registry=k8s-gcr.$${DOMAIN}=k8s.gcr.io
+      --override-default-registry=k8s.$${DOMAIN}=registry.k8s.io
+      --override-default-registry=mcr.$${DOMAIN}=mcr.microsoft.com
+      --override-default-registry=nvcr.$${DOMAIN}=nvcr.io
+      --override-default-registry=quay.$${DOMAIN}=quay.io
+      --override-default-registry=jujucharms.$${DOMAIN}=registry.jujucharms.com
+```
+注意修改 environment 区块的变量 `DOMAIN=your-actual-domain.xyz` 为你自己的域名
+
+
+2.然后执行 `docker-compose up -d`
+
+3.使用方式参考下方别名方案
+
+<div>
+</details>
+  
+<del>
+  
 ## 通过项目脚本部署
+
+<details>
+<summary><strong>通过项目脚本部署</strong></summary>
+<div>
+  
 ```
 # CentOS
 yum -y install wget curl
@@ -31,6 +141,10 @@ apt -y install wget curl
 
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/kubesre/docker-registry-mirrors/main/dockerproxy/install/DockerProxy_Install.sh)"
 ```
+</details>
+</del>
+<del>
+  
 ## 使用Render部署（无需服务器和域名且免费方案）
 <details>
 <summary><strong>部署到 Render</strong></summary>
@@ -39,6 +153,8 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/kubesre/docker-registry-
 [使用Render快速部署](Render/README.md)
 
 </details>
+
+</del>
 
 ## 使用Sealos部署（无需服务器和域名-个人使用低成本方案）
 <details>
